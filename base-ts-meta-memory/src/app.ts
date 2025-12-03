@@ -1,12 +1,12 @@
 import * as dotenv from 'dotenv'
-import { join } from 'path'
-import { createBot, createProvider, createFlow, addKeyword, utils } from '@builderbot/bot'
+import { createBot, createProvider, createFlow, addKeyword } from '@builderbot/bot'
 import { MemoryDB as Database } from '@builderbot/bot'
 import { MetaProvider as Provider } from '@builderbot/provider-meta'
 
 dotenv.config()
 const PORT = process.env.PORT ?? 3008
 
+// Flujo principal de soporte
 const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'ayuda', 'error'])
     .addAnswer(
         [
@@ -25,7 +25,7 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         async (ctx, { state, fallBack }) => {
             const option = ctx.body.trim()
 
-            if (!['1','2','3','4','5'].includes(option)) {
+            if (!['1', '2', '3', '4', '5'].includes(option)) {
                 return fallBack('Por favor escribe una opción válida (1-5).')
             }
 
@@ -33,7 +33,8 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const noAbreSistemaFlow = addKeyword<Provider, Database>(['1'])
+// Flujo de cada opción
+const noAbreSistemaFlow = addKeyword<Provider, Database>(['1'])
     .addAction(async (_, { state }) => {
         if (state.get('option') !== '1') return false
     })
@@ -45,7 +46,7 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const licenciaFlow = addKeyword<Provider, Database>(['2'])
+const licenciaFlow = addKeyword<Provider, Database>(['2'])
     .addAction(async (_, { state }) => {
         if (state.get('option') !== '2') return false
     })
@@ -57,7 +58,7 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const portalFlow = addKeyword<Provider, Database>(['3'])
+const portalFlow = addKeyword<Provider, Database>(['3'])
     .addAction(async (_, { state }) => {
         if (state.get('option') !== '3') return false
     })
@@ -69,7 +70,7 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const cotizacionFlow = addKeyword<Provider, Database>(['4'])
+const cotizacionFlow = addKeyword<Provider, Database>(['4'])
     .addAction(async (_, { state }) => {
         if (state.get('option') !== '4') return false
     })
@@ -81,7 +82,7 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const otroProblemaFlow = addKeyword<Provider, Database>(['5'])
+const otroProblemaFlow = addKeyword<Provider, Database>(['5'])
     .addAction(async (_, { state }) => {
         if (state.get('option') !== '5') return false
     })
@@ -93,7 +94,8 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const resumenFlow = addKeyword<Provider, Database>(['1','2','3','4','5'])
+// Flujo de resumen y confirmación
+const resumenFlow = addKeyword<Provider, Database>(['1', '2', '3', '4', '5'])
     .addAction(async (_, { state, flowDynamic }) => {
         const option = state.get('option')
 
@@ -108,24 +110,21 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         if (option === '5') resumen += `📝 Otro problema\nDescripción: ${state.get('otherIssue')}`
 
         await flowDynamic(resumen)
-
         await flowDynamic('\n¿Deseas ser contactado por un agente humano? (si/no)')
-
     })
     .addAnswer(
         '',
         { capture: true },
         async (ctx, { flowDynamic, state }) => {
-
             if (!state.get('option')) return
 
             const text = ctx.body.trim().toLowerCase()
 
-            const isYes = /^si$/i.test(text)
-            const isNo = /^no$/i.test(text)
+            const isYes = text === 'si'
+            const isNo = text === 'no'
 
             if (!isYes && !isNo) {
-                return flowDynamic('Por favor responde *si* o *no*.')
+                await flowDynamic('Por favor responde *si* o *no*.')
             }
 
             if (isYes) {
@@ -138,8 +137,35 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         }
     )
 
-    const main = async () => {
+const saludoFlow = addKeyword<Provider, Database>([
+    'hola', 'holaa', 'holaaa',
+    'buenas', 'buenos días', 'buen dia',
+    'buenas tardes', 'buenas noches',
+    'hey', 'que tal', 'saludos'
+])
+.addAnswer(
+    '¡Hola! 👋 ¿Necesitas ayuda con algo?',
+    null,
+    async (_, { gotoFlow, state }) => {
+        // Verificar si el flujo ya fue activado
+        const inFlow = state.get('inFlow');  // Estado que indica si estamos en un flujo
+
+        if (inFlow) {
+            console.log('Ya estás en un flujo, no redirigiendo.');
+            return;  // Si estamos en un flujo, no hacemos nada
+        }
+
+        // Si no estamos en un flujo, redirigir al flujo de soporte
+        console.log('Redirigiendo al flujo de soporte');
+        await state.update({ inFlow: true });  // Marcar que ahora estamos en un flujo
+        return gotoFlow(supportMainFlow);  // Redirigir al flujo principal de soporte
+    }
+);
+
+// Main bot
+const main = async () => {
     const adapterFlow = createFlow([
+        saludoFlow,
         supportMainFlow,
         noAbreSistemaFlow,
         licenciaFlow,
@@ -163,45 +189,6 @@ const supportMainFlow = addKeyword<Provider, Database>(['soporte', 'support', 'a
         provider: adapterProvider,
         database: adapterDB,
     })
-
-    adapterProvider.server.post(
-        '/v1/messages',
-        handleCtx(async (bot, req, res) => {
-            const { number, message, urlMedia } = req.body
-            await bot.sendMessage(number, message, { media: urlMedia ?? null })
-            return res.end('sended')
-        })
-    )
-
-    adapterProvider.server.post(
-        '/v1/register',
-        handleCtx(async (bot, req, res) => {
-            const { number, name } = req.body
-            await bot.dispatch('REGISTER_FLOW', { from: number, name })
-            return res.end('trigger')
-        })
-    )
-
-    adapterProvider.server.post(
-        '/v1/samples',
-        handleCtx(async (bot, req, res) => {
-            const { number, name } = req.body
-            await bot.dispatch('SAMPLES', { from: number, name })
-            return res.end('trigger')
-        })
-    )
-
-    adapterProvider.server.post(
-        '/v1/blacklist',
-        handleCtx(async (bot, req, res) => {
-            const { number, intent } = req.body
-            if (intent === 'remove') bot.blacklist.remove(number)
-            if (intent === 'add') bot.blacklist.add(number)
-
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            return res.end(JSON.stringify({ status: 'ok', number, intent }))
-        })
-    )
 
     httpServer(+PORT)
 }
